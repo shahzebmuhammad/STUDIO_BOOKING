@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import ModuleWorkspace from "@/components/ModuleWorkspace";
 import {
@@ -55,6 +55,8 @@ export default function Home() {
     "/reports": "Reports",
   };
   const activePage = pathname.startsWith("/clients/") ? "Client profile" : routeLabels[pathname] ?? "Overview";
+  const [session, setSession] = useState<{ fullName: string; email: string; role: string } | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [period, setPeriod] = useState("This week");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notice, setNotice] = useState("");
@@ -65,6 +67,30 @@ export default function Home() {
     { id: 3, icon: FileAudio2, tone: "notification-blue", title: "Episode ready for review", message: "A Different Kind of Growth", time: "2 hours ago", href: "/production", read: true },
   ]);
   const unreadNotifications = notifications.filter((item) => !item.read).length;
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/auth/me", { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) { router.replace("/login"); return; }
+      const result = await response.json() as { user: { fullName: string; email: string; role: string; mustChangePassword: boolean } };
+      if (result.user.mustChangePassword) { router.replace("/login"); return; }
+      if (active) setSession(result.user);
+    }).catch(() => router.replace("/login")).finally(() => { if (active) setSessionChecked(true); });
+    return () => { active = false; };
+  }, [router]);
+
+  if (!sessionChecked || !session) return <main className="auth-page"><div className="auth-loading">Loading your studio account…</div></main>;
+
+  const allowedNavigation = (label: string) => {
+    if (session.role === "admin") return true;
+    const access: Record<string, string[]> = {
+      manager: ["Overview", "Bookings", "Clients", "Production", "Equipment", "Memberships", "Staff & tasks", "Reports"],
+      reception: ["Overview", "Bookings", "Clients", "Payments & invoices", "Memberships", "Staff & tasks"],
+      editor: ["Overview", "Bookings", "Production", "Equipment", "Staff & tasks"],
+      finance: ["Overview", "Clients", "Payments & invoices", "Memberships", "Reports"],
+    };
+    return access[session.role]?.includes(label) ?? false;
+  };
 
   const showNotice = (message: string) => {
     setNotice(message);
@@ -88,7 +114,7 @@ export default function Home() {
 
         <div className="nav-section-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          {navigation.map(({ label, icon: Icon, badge }) => (
+          {navigation.filter(({ label }) => allowedNavigation(label)).map(({ label, icon: Icon, badge }) => (
             <button key={label} className={`nav-item ${activePage === label || (label === "Bookings" && activePage === "New booking") ? "nav-active" : ""}`} onClick={() => { router.push(label === "Overview" ? "/" : `/${label.toLowerCase()}`); setMobileMenuOpen(false); }}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>{badge && <span className="nav-badge">{badge}</span>}
             </button>
@@ -96,7 +122,7 @@ export default function Home() {
         </nav>
         <div className="nav-section-label management-label">MANAGE</div>
         <nav className="nav-list" aria-label="Management navigation">
-          {management.map(({ label, icon: Icon }) => (
+          {management.filter(({ label }) => allowedNavigation(label)).map(({ label, icon: Icon }) => (
             <button key={label} className={`nav-item ${activePage === label ? "nav-active" : ""}`} onClick={() => { router.push(`/${label === "Payments & invoices" ? "payments" : label === "Staff & tasks" ? "tasks" : label.toLowerCase()}`); setMobileMenuOpen(false); }}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
             </button>
@@ -111,10 +137,10 @@ export default function Home() {
           <button onClick={() => showNotice("Your monthly studio report is being prepared.")}>View studio report <ArrowRight size={14} /></button>
         </div>
         <button className="nav-item help-link" onClick={() => showNotice("Help center is coming soon.")}><LifeBuoy size={18} /><span>Help & support</span></button>
-        <div className="profile-row">
-           <div className="profile-avatar">MM</div>
-           <div className="profile-copy"><strong>Malik Mansoor</strong><span>Studio administrator</span></div>
-          <MoreHorizontal size={19} className="muted-icon" />
+          <div className="profile-row">
+            <div className="profile-avatar">{session.fullName.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase()}</div>
+            <div className="profile-copy"><strong>{session.fullName}</strong><span>{session.role} · {session.email}</span></div>
+           <button className="icon-button" aria-label="Sign out" title="Sign out" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); router.refresh(); }}><MoreHorizontal size={19} /></button>
         </div>
       </aside>
 
@@ -134,7 +160,7 @@ export default function Home() {
         </header>
 
         <div className={`dashboard-content ${activePage === "Overview" ? "" : "module-active"}`}>
-          {activePage !== "Overview" && <ModuleWorkspace activePage={activePage} pathname={pathname} onNotify={showNotice} />}
+          {activePage !== "Overview" && (allowedNavigation(activePage === "Client profile" ? "Clients" : activePage) ? <ModuleWorkspace activePage={activePage} pathname={pathname} onNotify={showNotice} /> : <section className="module-card access-denied-card"><ShieldCheck size={24} /><h1>Access restricted</h1><p>Your {session.role} account does not have permission to open this workspace.</p></section>)}
           <section className="welcome-row">
             <div>
               <div className="eyebrow"><span className="live-dot" /> YOUR STUDIO AT A GLANCE</div>

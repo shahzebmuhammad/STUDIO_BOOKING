@@ -1,34 +1,30 @@
 # Studio Operations
 
-A responsive business operations dashboard prototype for podcast and recording studios. The current dashboard uses illustrative sample data and interactive UI controls; integrations and persistent data are not configured.
+A studio-management dashboard built with Next.js, TypeScript, Google Sheets, and a Google Apps Script web app. The spreadsheet is the shared record store; authentication and authorization happen on the server and in Apps Script, not in browser code.
 
-## Requirements
+## Google Sheet and tabs
 
-- Node.js 20.9 or newer
-- npm
+The initial **Studio Operations Data** spreadsheet is [in Google Drive](https://docs.google.com/spreadsheets/d/1rXvKiiD1xKCUOIaVBIGQ4FCn6UPncG-qgHEz_AtEDjg/edit). It contains these tabs: `Users`, `Clients`, `Bookings`, `Tasks`, `Equipment`, `Episodes`, `Payments`, and `Memberships`. The bound [Apps Script project](https://script.google.com/home/projects/1tOjgaSCkTqyBZxMH3HTKOIObeQM-owfzH2Y62C0J2jyMCbClmjunCcky/edit) contains the API/authentication code. The spreadsheet ID and administrator email are already set in Script Properties; sensitive secrets and the initial password are intentionally left for the owner to enter. The users tab is for admin-managed app accounts; staff must not be added as Google Sheet collaborators. Keep the file private to the administrator because it includes business records and credential hashes.
 
-## Run locally
+## Required setup before using the app
 
-Install dependencies with `npm install`, then start the development server with `npm run dev`. Open `http://localhost:3000` in a browser. To create a production build, run `npm run build`; to serve that build, run `npm start`.
+1. In the spreadsheet, use **Extensions → Apps Script** and paste `google-apps-script/Code.gs` into the Apps Script project.
+2. In Apps Script **Project Settings → Script properties**, add `SPREADSHEET_ID` as `1rXvKiiD1xKCUOIaVBIGQ4FCn6UPncG-qgHEz_AtEDjg`, `API_SHARED_SECRET` as a long random secret, `INITIAL_ADMIN_EMAIL` as the administrator's email, and `INITIAL_ADMIN_PASSWORD` as a temporary password with at least 12 characters.
+3. Run `bootstrapAdmin` once from the Apps Script editor and approve its requested spreadsheet permissions. It creates the owner account and then removes the initial password property.
+4. Deploy Apps Script as a **Web app**, execute as the owner, accessible to **Anyone**. The endpoint is public, but requests require the random `API_SHARED_SECRET`; the browser never receives it. Redeploy after code changes.
+5. Locally, copy `.env.example` to `.env.local` and set the deployment URL plus two distinct random secrets. Set the same three variables in Vercel, then redeploy.
+6. Visit `/login` and sign in using the email and temporary password. For staff, the admin uses **Staff & tasks → Team & attendance → Add team member**, privately sends the generated temporary password, and the staff member must replace it on first login.
 
-## Production source visibility
+Do not put passwords, `API_SHARED_SECRET`, or `STUDIO_SESSION_SECRET` in client-side variables, a public sheet, Git, or chat. Never share the spreadsheet with staff. Use strong unique secrets and back up the spreadsheet before major changes.
 
-Production browser source maps are explicitly disabled, and Next.js minifies production browser bundles. Client-side code must still be delivered to browsers and can be inspected; it cannot be encrypted to conceal it. Keep secrets, authorization rules, and sensitive business logic on a protected server, not in client components.
+## Login and permissions
 
-## Dashboard and connected workspaces
+Accounts are created by the admin inside the app; invitations are not emailed automatically. Share the app URL and temporary password privately. Passwords are stored in the Users sheet as salted iterative SHA-256 hashes, not plain text. Staff sessions are signed, HttpOnly cookies. Available roles are admin, studio manager, reception, editor, and finance. The navigation is role-filtered; tasks are visible to the assignee and creator, while the admin can manage all tasks and staff accounts.
 
-The overview includes daily booking and revenue metrics, pending invoices, active memberships, studio utilization, episode production stages, today’s schedule, and upcoming tasks. The sidebar and dashboard actions navigate to connected routes for bookings, new booking, clients, production, equipment, payments, memberships, staff/tasks, and reports.
+## Current scope and limitations
 
-Bookings can be created with client, studio, date, start/end time, package, assigned staff, and special requests. The booking form offers date/studio-specific available slots, quick duration presets, and a confirmation dialog. New bookings persist in the current browser using local storage. The full month/week/day calendar displays client names and session times inside date cells; selecting a date shows its agenda, and a new booking can be started from that date. The bookings page supports search, status filtering and updates, and booking details.
+Staff account creation, sign-in, role-limited task listing, task assignment, and completion are connected to Sheets. The other studio modules still use their existing browser/demo data and have **not** been migrated to Sheets yet. A Google Sheet is convenient for a small team, but does not provide database-grade concurrency or audit guarantees; do not use it as the only secure record for regulated or highly sensitive information. Google Apps Script quotas and network latency can affect responsiveness. Payment entries do not process charges; reports and attendance remain illustrative/unconnected.
 
-Client creation, production episode tracking/status updates, and equipment registration/status updates are available as prototype workflows. The Staff & Tasks page supports task creation/completion and sample attendance check-ins. Memberships shows sample plan credits and supports adding member accounts. Reports includes revenue/service/source charts and CSV export. The notification bell opens a read/unread notification center. These records and notification states remain in UI state unless noted otherwise.
+## Development and validation
 
-Client and equipment creation support optional photo uploads, kept in this browser’s IndexedDB. Client profiles show a large circular photo; client and equipment directories offer card and list layouts. Booking start/end choices are filtered against occupied intervals for the selected date and studio, and successful bookings show an animated confirmation dialog. Dashboard and report charts animate on entry, with reduced-motion preferences respected.
-
-Client list entries open individual profile pages with contact details, notes, booking history, payment history, and receipt references. The Payments & Invoices page records payments against a selected client, with Cash or Card method, invoice amount/status, and optional PDF/JPG/PNG receipt. Payment records and client records use browser local storage; receipt files and profile photos are kept in browser IndexedDB. Card payment links must be created externally and pasted into the form; the email action opens a reviewable mail draft and does not send it. No payment is charged or processed by this prototype, and local storage is not a secure document repository.
-
-## Planned business modules
-
-The product roadmap includes client history and files, payment processing and invoicing, memberships, production asset delivery, staff and payroll, marketing analytics, finance, workshops and events, digital checklists, WhatsApp messaging, and role-based access for administrators, reception, studio managers, editors, finance staff, and clients.
-
-Payment processing, WhatsApp messaging, authentication, file storage, and backend persistence are not connected. Configure these only with approved provider credentials and production requirements.
+Requirements: Node.js 20.9 or newer and npm. Run `npm install`, copy/configure `.env.local`, then `npm run dev`. Validate with `npm run lint` and `npm run build`.

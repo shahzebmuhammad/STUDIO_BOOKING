@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownToLine, ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, Plus, Search, Sparkles, UserCheck, Users, X } from "lucide-react";
+import { ArrowDownToLine, ArrowRight, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock3, Plus, Search, Sparkles, Users, X } from "lucide-react";
 
 type Booking = { id: string; client: string; session: string; studio: string; date: string; start: string; end: string; status: string; initials: string };
 type Client = { id: string; name: string; company?: string; sessions?: number };
@@ -112,23 +112,79 @@ export function CalendarWorkspace({ onNotify }: Props) {
   </div>;
 }
 
-type Task = { id: number; title: string; category: string; assignee: string; due: string; done: boolean };
-const teamSeed = [{ name: "Layla Al Ansari", role: "Studio manager", initials: "LA", status: "On shift", time: "09:00 AM – 06:00 PM", tone: "peach" }, { name: "Yousef Khalifa", role: "Editor & videographer", initials: "YK", status: "On shift", time: "10:00 AM – 07:00 PM", tone: "blue" }, { name: "Malik Mansoor", role: "Reception", initials: "MM", status: "On shift", time: "08:30 AM – 05:30 PM", tone: "violet" }, { name: "Rashid Nasser", role: "Production editor", initials: "RN", status: "Off today", time: "Next shift · Sat 10 Oct", tone: "mint" }];
-const taskSeed: Task[] = [{ id: 1, title: "Prepare Studio A", category: "Booking prep", assignee: "Layla Al Ansari", due: "10:40 AM", done: false }, { id: 2, title: "Review episode audio", category: "Post-production", assignee: "Yousef Khalifa", due: "12:00 PM", done: false }, { id: 3, title: "Send invoice to Omar", category: "Finance", assignee: "Malik Mansoor", due: "02:00 PM", done: false }, { id: 4, title: "Back up Sara’s raw files", category: "File delivery", assignee: "Yousef Khalifa", due: "03:30 PM", done: true }];
+type Task = { id: string; title: string; category: string; assignee: string; assigneeEmail: string; due: string; done: boolean };
+type StaffAccount = { id: string; email: string; fullName: string; role: string; active: boolean };
 export function TeamTasksWorkspace({ onNotify }: Props) {
   const [tab, setTab] = useState("Tasks");
-  const [tasks, setTasks] = useState(taskSeed);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [team, setTeam] = useState<StaffAccount[]>([]);
   const [taskForm, setTaskForm] = useState(false);
+  const [staffForm, setStaffForm] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [actor, setActor] = useState<{ email: string; role: string } | null>(null);
   const [query, setQuery] = useState("");
-  const [checkedIn, setCheckedIn] = useState<string[]>(["Layla Al Ansari", "Yousef Khalifa", "Malik Mansoor"]);
   const [filter, setFilter] = useState("All tasks");
+  useEffect(() => {
+    let active = true;
+    void Promise.all([fetch("/api/auth/me", { cache: "no-store" }).then((response) => response.json()), fetch("/api/data/tasks", { cache: "no-store" }).then(async (response) => { const value = await response.json(); if (!response.ok) throw new Error(value.error || "Could not load tasks."); return value.data as Array<{ id: string; title: string; category: string; assignee_email: string; due_at: string; status: string }>; })]).then(async ([auth, rows]) => {
+      if (!active) return;
+      setActor(auth.user);
+      setTasks(rows.map((row) => ({ id: row.id, title: row.title, category: row.category, assigneeEmail: row.assignee_email, assignee: row.assignee_email, due: row.due_at || "No due time", done: row.status === "complete" })));
+      if (auth.user?.role === "admin") {
+        const response = await fetch("/api/data/staff", { cache: "no-store" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not load staff accounts.");
+        if (active) setTeam(result.data as StaffAccount[]);
+      } else if (active) setTeam([{ id: auth.user.id, email: auth.user.email, fullName: auth.user.fullName, role: auth.user.role, active: true }]);
+    }).catch((cause: unknown) => { if (active) setFeedback(cause instanceof Error ? cause.message : "Could not load workspace data."); });
+    return () => { active = false; };
+  }, []);
   const filtered = tasks.filter((task) => `${task.title} ${task.category} ${task.assignee}`.toLowerCase().includes(query.toLowerCase()) && (filter === "All tasks" || (filter === "Completed" ? task.done : !task.done)));
-  return <div className="module-workspace"><Heading eyebrow="PEOPLE & OPERATIONS" title="Staff & tasks" subtitle="Coordinate today’s studio team, check-ins, and production to-dos." action={<button className="primary-button" onClick={() => tab === "Tasks" ? setTaskForm((open) => !open) : onNotify("Staff details are managed in the team roster.")}><Plus size={16} /> {tab === "Tasks" ? "New task" : "Add team member"}</button>} />
-    <div className="team-summary-row"><div className="team-summary-card"><span>Team on shift</span><strong>{checkedIn.length}<small> / 4 today</small></strong><i className="summary-green" /></div><div className="team-summary-card"><span>Open tasks</span><strong>{tasks.filter((task) => !task.done).length}<small> to complete</small></strong><i className="summary-purple" /></div><div className="team-summary-card"><span>Completed today</span><strong>{tasks.filter((task) => task.done).length}<small> tasks</small></strong><i className="summary-amber" /></div></div>
+  const createTask = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch("/api/data/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: form.get("title"), category: form.get("category"), assigneeEmail: form.get("assignee"), dueAt: form.get("due") }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not save task.");
+      const row = result.data;
+      setTasks((current) => [{ id: row.id, title: row.title, category: row.category, assigneeEmail: row.assignee_email, assignee: row.assignee_email, due: row.due_at || "No due time", done: false }, ...current]);
+      setTaskForm(false);
+      onNotify("Task assigned and saved to the studio sheet.");
+    } catch (cause) { setFeedback(cause instanceof Error ? cause.message : "Could not save task."); }
+  };
+  const createStaff = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch("/api/data/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: form.get("email"), fullName: form.get("fullName"), role: form.get("role") }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not create staff account.");
+      setTeam((current) => [result.data.user as StaffAccount, ...current]);
+      setTemporaryPassword(result.data.temporaryPassword as string);
+      setStaffForm(false);
+      setFeedback("Account created. Copy the temporary password and share it with the staff member privately.");
+    } catch (cause) { setFeedback(cause instanceof Error ? cause.message : "Could not create staff account."); }
+  };
+  const toggleTask = async (task: Task) => {
+    const done = !task.done;
+    setTasks((current) => current.map((item) => item.id === task.id ? { ...item, done } : item));
+    try {
+      const response = await fetch("/api/data/tasks", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: task.id, done }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not update task.");
+    } catch (cause) { setTasks((current) => current.map((item) => item.id === task.id ? { ...item, done: task.done } : item)); setFeedback(cause instanceof Error ? cause.message : "Could not update task."); }
+  };
+  const canManageTasks = actor?.role === "admin" || actor?.role === "manager";
+  return <div className="module-workspace"><Heading eyebrow="PEOPLE & OPERATIONS" title="Staff & tasks" subtitle="Create staff logins and assign trackable studio tasks." action={(tab === "Tasks" && canManageTasks) || (tab !== "Tasks" && actor?.role === "admin") ? <button className="primary-button" onClick={() => tab === "Tasks" ? setTaskForm((open) => !open) : setStaffForm((open) => !open)}><Plus size={16} /> {tab === "Tasks" ? "New task" : "Add team member"}</button> : undefined} />
+    <div className="team-summary-row"><div className="team-summary-card"><span>Active accounts</span><strong>{team.length}<small> team members</small></strong><i className="summary-green" /></div><div className="team-summary-card"><span>Open tasks</span><strong>{tasks.filter((task) => !task.done).length}<small> to complete</small></strong><i className="summary-purple" /></div><div className="team-summary-card"><span>Completed</span><strong>{tasks.filter((task) => task.done).length}<small> tasks</small></strong><i className="summary-amber" /></div></div>
     <section className="module-card"><div className="team-page-toolbar"><div className="module-tabs">{["Tasks", "Team & attendance"].map((value) => <button key={value} className={tab === value ? "module-tab-active" : ""} onClick={() => setTab(value)}>{value}</button>)}</div>{tab === "Tasks" && <div className="module-tools"><label className="module-search"><Search size={15} /><input aria-label="Search tasks" placeholder="Search tasks or assignee" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label className="filter-select"><select value={filter} onChange={(event) => setFilter(event.target.value)}><option>All tasks</option><option>Open</option><option>Completed</option></select><ChevronDown size={13} /></label></div>}</div>
-      {taskForm && tab === "Tasks" && <form className="task-create-form" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); setTasks((current) => [{ id: Date.now(), title: String(form.get("title")), category: String(form.get("category")), assignee: String(form.get("assignee")), due: String(form.get("due")), done: false }, ...current]); setTaskForm(false); onNotify("Task added to today’s list."); }}><label className="field-label">Task<input name="title" required placeholder="What needs to be done?" /></label><label className="field-label">Category<select name="category"><option>Booking prep</option><option>Post-production</option><option>Finance</option><option>File delivery</option></select></label><label className="field-label">Assign to<select name="assignee">{teamSeed.map((person) => <option key={person.name}>{person.name}</option>)}</select></label><label className="field-label">Due<input name="due" type="time" defaultValue="15:00" /></label><button className="primary-button"><Check size={15} /> Save task</button></form>}
-      {tab === "Tasks" ? <div className="task-workspace-list">{filtered.map((task) => <div className={`task-workspace-row ${task.done ? "task-is-done" : ""}`} key={task.id}><button className={`task-toggle ${task.done ? "task-toggle-done" : ""}`} aria-label={task.done ? "Mark task open" : "Complete task"} onClick={() => setTasks((current) => current.map((item) => item.id === task.id ? { ...item, done: !item.done } : item))}>{task.done && <Check size={14} />}</button><span className="task-workspace-copy"><strong>{task.title}</strong><small>{task.category}</small></span><span className="task-assignee"><Users size={14} />{task.assignee}</span><span className="task-deadline"><Clock3 size={14} />{task.due}</span><span className={`task-state ${task.done ? "task-state-done" : ""}`}>{task.done ? "Complete" : "In progress"}</span></div>)}{!filtered.length && <div className="empty-state">No tasks match that filter.</div>}</div> : <div className="staff-roster">{teamSeed.map((person) => <article className="staff-card" key={person.name}><div className={`staff-avatar ${person.tone}`}>{person.initials}</div><div className="staff-name"><strong>{person.name}</strong><small>{person.role}</small></div><span className={`staff-presence ${checkedIn.includes(person.name) ? "presence-on" : "presence-off"}`}><i />{checkedIn.includes(person.name) ? "On shift" : person.status === "Off today" ? "Off today" : "Not checked in"}</span><small className="staff-hours">{person.time}</small><button className={`attendance-button ${checkedIn.includes(person.name) ? "attendance-out" : ""}`} disabled={person.status === "Off today"} onClick={() => setCheckedIn((current) => current.includes(person.name) ? current.filter((name) => name !== person.name) : [...current, person.name])}><UserCheck size={14} />{checkedIn.includes(person.name) ? "Check out" : "Check in"}</button></article>)}</div>}</section>
-    <div className="module-note"><CircleCheck size={15} /> Tasks and attendance are prototype UI state and are not synced to a server.</div>
+      {feedback && <div className="database-error-banner" role="status">{feedback}</div>}{temporaryPassword && <div className="module-card"><strong>Temporary password (shown once)</strong><p className="temporary-password">{temporaryPassword}</p><small>Share privately. The staff member will be required to replace it at first sign-in.</small></div>}
+      {taskForm && tab === "Tasks" && <form className="task-create-form" onSubmit={createTask}><label className="field-label">Task<input name="title" required placeholder="What needs to be done?" /></label><label className="field-label">Category<select name="category"><option>Booking prep</option><option>Post-production</option><option>Finance</option><option>File delivery</option></select></label><label className="field-label">Assign to<select name="assignee" required>{team.map((person) => <option value={person.email} key={person.id}>{person.fullName} · {person.role}</option>)}</select></label><label className="field-label">Due<input name="due" type="time" defaultValue="15:00" /></label><button className="primary-button"><Check size={15} /> Save task</button></form>}
+      {staffForm && tab !== "Tasks" && actor?.role === "admin" && <form className="task-create-form" onSubmit={createStaff}><label className="field-label">Full name<input name="fullName" required minLength={2} /></label><label className="field-label">Email<input name="email" type="email" required /></label><label className="field-label">Role<select name="role"><option value="manager">Studio manager</option><option value="reception">Reception</option><option value="editor">Editor</option><option value="finance">Finance</option></select></label><button className="primary-button"><Check size={15} /> Create login</button></form>}
+      {tab === "Tasks" ? <div className="task-workspace-list">{filtered.map((task) => <div className={`task-workspace-row ${task.done ? "task-is-done" : ""}`} key={task.id}><button className={`task-toggle ${task.done ? "task-toggle-done" : ""}`} aria-label={task.done ? "Mark task open" : "Complete task"} onClick={() => void toggleTask(task)}>{task.done && <Check size={14} />}</button><span className="task-workspace-copy"><strong>{task.title}</strong><small>{task.category}</small></span><span className="task-assignee"><Users size={14} />{task.assignee}</span><span className="task-deadline"><Clock3 size={14} />{task.due}</span><span className={`task-state ${task.done ? "task-state-done" : ""}`}>{task.done ? "Complete" : "In progress"}</span></div>)}{!filtered.length && <div className="empty-state">No tasks match that filter.</div>}</div> : <div className="staff-roster">{team.map((person) => <article className="staff-card" key={person.id}><div className="staff-avatar">{person.fullName.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase()}</div><div className="staff-name"><strong>{person.fullName}</strong><small>{person.role} · {person.email}</small></div><span className="staff-presence presence-on"><i />Account active</span></article>)}</div>}</section>
+    <div className="module-note"><CircleCheck size={15} /> Staff accounts, permissions, tasks, assignments, and completion are stored in the private Google Sheet. Attendance is not tracked yet.</div>
   </div>;
 }
 
