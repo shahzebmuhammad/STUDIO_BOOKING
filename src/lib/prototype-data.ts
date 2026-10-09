@@ -11,7 +11,6 @@ export type ClientRecord = {
   vatNumber?: string;
   notes?: string;
   photoId?: string;
-  createdAt?: string;
 };
 
 export type PaymentRecord = {
