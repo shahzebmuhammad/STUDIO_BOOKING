@@ -1,34 +1,34 @@
 # Studio Operations
 
-A responsive business operations dashboard prototype for podcast and recording studios. The current dashboard uses illustrative sample data and interactive UI controls; integrations and persistent data are not configured.
+A responsive studio-management app built with Next.js, TypeScript, and Supabase. When Supabase is configured, authentication, organization workspaces, and connected records use the shared database. Without Supabase environment variables, the UI falls back to its browser-based prototype data.
 
 ## Requirements
 
 - Node.js 20.9 or newer
 - npm
 
-## Run locally
+## Local setup
 
-Install dependencies with `npm install`, then start the development server with `npm run dev`. Open `http://localhost:3000` in a browser. To create a production build, run `npm run build`; to serve that build, run `npm start`.
+1. Install dependencies with `npm install`.
+2. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from the Supabase project's API settings. Do not put a service-role key in a `NEXT_PUBLIC_` variable.
+3. Start the app with `npm run dev` and open `http://localhost:3000`.
 
-## Production source visibility
+The Supabase project already has the initial schema from `supabase/migrations/202610090001_initial_schema.sql`. **Do not run that initial migration again against the existing database.** The storage-policy correction in `supabase/migrations/202610090002_fix_client_photo_storage_policy.sql` has been applied to the configured project. For future changes, create and apply a new incremental migration.
 
-Production browser source maps are explicitly disabled, and Next.js minifies production browser bundles. Client-side code must still be delivered to browsers and can be inspected; it cannot be encrypted to conceal it. Keep secrets, authorization rules, and sensitive business logic on a protected server, not in client components.
+## First workspace
 
-## Dashboard and connected workspaces
+1. Open `/login` and create the owner account.
+2. If email confirmation is enabled in Supabase Auth, confirm the address from the email, then sign in.
+3. Complete `/setup` to create the organization and its initial Studio A and Studio B records.
 
-The overview includes daily booking and revenue metrics, pending invoices, active memberships, studio utilization, episode production stages, today’s schedule, and upcoming tasks. The sidebar and dashboard actions navigate to connected routes for bookings, new booking, clients, production, equipment, payments, memberships, staff/tasks, and reports.
+Supabase Auth redirect URLs must include the deployed app's `/auth/callback` and the local development callback. Workspace records are isolated with Postgres row-level security. Use authenticated, request-scoped server actions for database reads and writes; never expose a service-role key in browser code.
 
-Bookings can be created with client, studio, date, start/end time, package, assigned staff, and special requests. The booking form offers date/studio-specific available slots, quick duration presets, and a confirmation dialog. New bookings persist in the current browser using local storage. The full month/week/day calendar displays client names and session times inside date cells; selecting a date shows its agenda, and a new booking can be started from that date. The bookings page supports search, status filtering and updates, and booking details.
+## Connected data
 
-Client creation, production episode tracking/status updates, and equipment registration/status updates are available as prototype workflows. The Staff & Tasks page supports task creation/completion and sample attendance check-ins. Memberships shows sample plan credits and supports adding member accounts. Reports includes revenue/service/source charts and CSV export. The notification bell opens a read/unread notification center. These records and notification states remain in UI state unless noted otherwise.
+The current Supabase-backed flows include clients and photos, bookings and status updates, equipment and status, production episodes, memberships, tasks, payment records/invoices, private receipt uploads, and dashboard aggregates. Client/equipment/receipt files are stored in private organization-scoped Supabase Storage buckets and served through short-lived signed URLs.
 
-Client and equipment creation support optional photo uploads, kept in this browser’s IndexedDB. Client profiles show a large circular photo; client and equipment directories offer card and list layouts. Booking start/end choices are filtered against occupied intervals for the selected date and studio, and successful bookings show an animated confirmation dialog. Dashboard and report charts animate on entry, with reduced-motion preferences respected.
+This is not a payment processor: payment entries document a status and do not move money. Card checkout links are supplied externally. Attendance, reports, and some prototype interactions are not yet fully database-backed and should not be treated as authoritative business reporting. Without Supabase configuration, data is illustrative/local browser state.
 
-Client list entries open individual profile pages with contact details, notes, booking history, payment history, and receipt references. The Payments & Invoices page records payments against a selected client, with Cash or Card method, invoice amount/status, and optional PDF/JPG/PNG receipt. Payment records and client records use browser local storage; receipt files and profile photos are kept in browser IndexedDB. Card payment links must be created externally and pasted into the form; the email action opens a reviewable mail draft and does not send it. No payment is charged or processed by this prototype, and local storage is not a secure document repository.
+## Validation
 
-## Planned business modules
-
-The product roadmap includes client history and files, payment processing and invoicing, memberships, production asset delivery, staff and payroll, marketing analytics, finance, workshops and events, digital checklists, WhatsApp messaging, and role-based access for administrators, reception, studio managers, editors, finance staff, and clients.
-
-Payment processing, WhatsApp messaging, authentication, file storage, and backend persistence are not connected. Configure these only with approved provider credentials and production requirements.
+Run `npm run lint` and `npm run build` before deploying. Vercel must have the same two public Supabase environment variables configured for each target environment. Keep `.env.local` untracked.

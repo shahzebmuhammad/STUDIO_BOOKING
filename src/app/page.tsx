@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import ModuleWorkspace from "@/components/ModuleWorkspace";
+import { getOrganizationDashboardSummary, listOrganizationBookings, listOrganizationEpisodes, listOrganizationTasks } from "@/lib/supabase/actions";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, CalendarDays,
   Check, ChevronDown, CircleDollarSign, Clock3, Command, CreditCard, FileAudio2,
@@ -38,6 +40,11 @@ const chartData = [
   { day: "Tue", value: 68 }, { day: "Wed", value: 56 }, { day: "Thu", value: 82 }, { day: "Fri", value: 62 },
 ];
 
+type DashboardBooking = { id: string; time: string; initials: string; name: string; detail: string; studio: string; status: string; color: string; duration: string };
+const demoDashboardBookings: DashboardBooking[] = bookings.map((booking, index) => ({ ...booking, id: `demo-${index}` }));
+type DashboardSummary = { bookingsToday: number; revenueToday: number; pendingPayments: number; pendingInvoiceCount: number; activeMemberships: number; studioUtilization: number; availableEquipment: number; totalClients: number };
+const isServerConfigured = isSupabaseConfigured();
+
 export default function Home() {
   const pathname = usePathname();
   const router = useRouter();
@@ -56,15 +63,39 @@ export default function Home() {
   };
   const activePage = pathname.startsWith("/clients/") ? "Client profile" : routeLabels[pathname] ?? "Overview";
   const [period, setPeriod] = useState("This week");
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [dashboardBookings, setDashboardBookings] = useState<DashboardBooking[]>(demoDashboardBookings);
+  const [dashboardEpisodes, setDashboardEpisodes] = useState<Awaited<ReturnType<typeof listOrganizationEpisodes>>>([]);
+  const [dashboardTasks, setDashboardTasks] = useState<Awaited<ReturnType<typeof listOrganizationTasks>>>([]);
+  const [dashboardError, setDashboardError] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState([
+  const [notifications, setNotifications] = useState(() => isServerConfigured ? [] : [
     { id: 1, icon: CalendarDays, tone: "notification-purple", title: "New booking confirmed", message: "Sara Khalid · Studio A · 9:00 AM", time: "12 min ago", href: "/bookings", read: false },
     { id: 2, icon: CreditCard, tone: "notification-green", title: "Payment received", message: "AED 1,500 from Omar Al Nuaimi", time: "48 min ago", href: "/payments", read: false },
     { id: 3, icon: FileAudio2, tone: "notification-blue", title: "Episode ready for review", message: "A Different Kind of Growth", time: "2 hours ago", href: "/production", read: true },
   ]);
   const unreadNotifications = notifications.filter((item) => !item.read).length;
+
+  useEffect(() => {
+    if (!isServerConfigured) return;
+    let active = true;
+    void Promise.all([getOrganizationDashboardSummary(), listOrganizationBookings(), listOrganizationEpisodes(), listOrganizationTasks()]).then(([summary, rows, episodes, tasks]) => {
+      if (!active) return;
+      setDashboardSummary(summary);
+      setDashboardEpisodes(episodes);
+      setDashboardTasks(tasks);
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      setDashboardBookings(rows.filter((booking) => booking.date === today).map((booking) => {
+        const [startHour, startMinute] = booking.start.split(":").map(Number);
+        const [endHour, endMinute] = booking.end.split(":").map(Number);
+        const hours = (endHour * 60 + endMinute - startHour * 60 - startMinute) / 60;
+        return { id: booking.id, time: new Date(`1970-01-01T${booking.start}:00`).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }), initials: booking.initials, name: booking.client, detail: booking.session, studio: booking.studio, status: booking.status, color: "violet", duration: hours === 1 ? "1 hr" : `${hours} hrs` };
+      }));
+    }).catch((cause: unknown) => { if (active) setDashboardError(cause instanceof Error ? cause.message : "Could not load dashboard data."); });
+    return () => { active = false; };
+  }, []);
 
   const showNotice = (message: string) => {
     setNotice(message);
@@ -135,6 +166,7 @@ export default function Home() {
 
         <div className={`dashboard-content ${activePage === "Overview" ? "" : "module-active"}`}>
           {activePage !== "Overview" && <ModuleWorkspace activePage={activePage} pathname={pathname} onNotify={showNotice} />}
+          {dashboardError && activePage === "Overview" && <div className="database-error-banner" role="alert">Database connection: {dashboardError}</div>}
           <section className="welcome-row">
             <div>
               <div className="eyebrow"><span className="live-dot" /> YOUR STUDIO AT A GLANCE</div>
@@ -147,27 +179,27 @@ export default function Home() {
           <section className="stats-grid" aria-label="Today's statistics">
             <article className="stat-card">
               <div className="stat-top"><span className="stat-label">Bookings today</span><span className="stat-icon icon-purple"><CalendarDays size={17} /></span></div>
-              <div className="stat-number">08<span className="stat-total"> / 12</span></div>
-              <div className="stat-foot"><span className="trend positive"><ArrowUpRight size={14} /> 12.5%</span><span>vs. last Friday</span></div>
-              <div className="mini-progress"><i style={{ width: "67%" }} /></div>
+              <div className="stat-number">{isServerConfigured ? dashboardSummary?.bookingsToday ?? "—" : "08"}<span className="stat-total">{isServerConfigured ? " today" : " / 12"}</span></div>
+              <div className="stat-foot">{isServerConfigured ? <span>Scheduled in database today</span> : <><span className="trend positive"><ArrowUpRight size={14} /> 12.5%</span><span>vs. last Friday</span></>}</div>
+              <div className="mini-progress"><i style={{ width: `${isServerConfigured ? Math.min(100, (dashboardSummary?.bookingsToday ?? 0) * 8) : 67}%` }} /></div>
             </article>
             <article className="stat-card">
               <div className="stat-top"><span className="stat-label">Revenue today</span><span className="stat-icon icon-green"><CircleDollarSign size={18} /></span></div>
-              <div className="stat-number"><span className="currency">AED</span> 4,850</div>
-              <div className="stat-foot"><span className="trend positive"><ArrowUpRight size={14} /> 8.2%</span><span>vs. last Friday</span></div>
-              <div className="stat-note"><span className="note-dot green-dot" /> AED 1,200 pending</div>
+              <div className="stat-number"><span className="currency">AED</span> {isServerConfigured ? dashboardSummary?.revenueToday.toLocaleString("en-AE") ?? "—" : "4,850"}</div>
+              <div className="stat-foot">{isServerConfigured ? <span>Paid payments recorded today</span> : <><span className="trend positive"><ArrowUpRight size={14} /> 8.2%</span><span>vs. last Friday</span></>}</div>
+              {!isServerConfigured && <div className="stat-note"><span className="note-dot green-dot" /> AED 1,200 pending</div>}
             </article>
             <article className="stat-card">
               <div className="stat-top"><span className="stat-label">Pending payments</span><span className="stat-icon icon-amber"><Wallet size={17} /></span></div>
-              <div className="stat-number">AED 3,200</div>
-              <div className="stat-foot"><span className="pending-copy">4 invoices</span><span>awaiting payment</span></div>
+              <div className="stat-number">AED {isServerConfigured ? dashboardSummary?.pendingPayments.toLocaleString("en-AE") ?? "—" : "3,200"}</div>
+              <div className="stat-foot"><span className="pending-copy">{isServerConfigured ? dashboardSummary?.pendingInvoiceCount ?? "—" : 4} invoices</span><span>awaiting payment</span></div>
               <div className="stat-link" onClick={() => router.push("/payments")}>Review invoices <ArrowRight size={13} /></div>
             </article>
             <article className="stat-card">
               <div className="stat-top"><span className="stat-label">Active memberships</span><span className="stat-icon icon-blue"><Users size={17} /></span></div>
-              <div className="stat-number">24<span className="stat-total"> members</span></div>
-              <div className="stat-foot"><span className="trend positive"><ArrowUpRight size={14} /> 2 new</span><span>this month</span></div>
-              <div className="avatar-stack"><span className="stack-one">SK</span><span className="stack-two">OA</span><span className="stack-three">+22</span><small>Growing community</small></div>
+              <div className="stat-number">{isServerConfigured ? dashboardSummary?.activeMemberships ?? "—" : 24}<span className="stat-total"> members</span></div>
+              <div className="stat-foot">{isServerConfigured ? <span>Active membership records</span> : <><span className="trend positive"><ArrowUpRight size={14} /> 2 new</span><span>this month</span></>}</div>
+              {!isServerConfigured && <div className="avatar-stack"><span className="stack-one">SK</span><span className="stack-two">OA</span><span className="stack-three">+22</span><small>Growing community</small></div>}
             </article>
           </section>
 
@@ -177,21 +209,22 @@ export default function Home() {
                 <div><h2>Studio utilization</h2><p>Hours booked across your studios</p></div>
                 <button className="select-button" onClick={() => setPeriod(period === "This week" ? "This month" : "This week")}>{period}<ChevronDown size={14} /></button>
               </div>
-              <div className="utilization-summary"><strong>68<span>%</span></strong><span className="trend positive"><ArrowUpRight size={14} /> 6.4%</span><small>vs. previous period</small></div>
-              <div className="chart" role="img" aria-label="Bar chart showing studio utilization from Saturday through Friday">
+              <div className="utilization-summary"><strong>{isServerConfigured ? dashboardSummary?.studioUtilization ?? "—" : 68}<span>%</span></strong><span className="trend positive"><ArrowUpRight size={14} /> {isServerConfigured ? "Today" : "6.4%"}</span><small>{isServerConfigured ? "of bookable hours" : "vs. previous period"}</small></div>
+              {!isServerConfigured && <div className="chart" role="img" aria-label="Illustrative bar chart showing studio utilization from Saturday through Friday">
                 <div className="chart-grid"><span>100%</span><span>75%</span><span>50%</span><span>25%</span></div>
                 <div className="chart-bars">{chartData.map((item) => <div className="chart-column" key={item.day}><div className="bar-track"><div className={`bar-fill ${item.day === "Fri" ? "bar-today" : ""}`} style={{ height: `${item.value}%` }} /></div><span className={item.day === "Fri" ? "day-today" : ""}>{item.day}</span></div>)}</div>
-              </div>
-              <div className="chart-legend"><span><i className="legend-dot studio-a-dot" /> Studio A <b>72%</b></span><span><i className="legend-dot studio-b-dot" /> Studio B <b>64%</b></span></div>
+              </div>}
+              {!isServerConfigured && <div className="chart-legend"><span><i className="legend-dot studio-a-dot" /> Studio A <b>72%</b></span><span><i className="legend-dot studio-b-dot" /> Studio B <b>64%</b></span></div>}
+              {isServerConfigured && <div className="live-data-note"><CalendarDays size={15} /> Live utilization from today&apos;s saved bookings.</div>}
             </article>
 
             <article className="panel production-panel">
               <div className="panel-heading"><div><h2>Production pipeline</h2><p>Episodes moving through the studio</p></div><button className="more-button" aria-label="More production options" onClick={() => showNotice("Production overview selected.")}><MoreHorizontal size={20} /></button></div>
-              <div className="pipeline-total"><strong>16</strong><span>episodes in progress</span><span className="pipeline-trend"><ArrowUpRight size={14} /> 3 this week</span></div>
+              <div className="pipeline-total"><strong>{isServerConfigured ? dashboardEpisodes.length : 16}</strong><span>episodes in progress</span><span className="pipeline-trend">{isServerConfigured ? "Live" : <><ArrowUpRight size={14} /> 3 this week</>}</span></div>
               <div className="pipeline-list">
-                <div className="pipeline-row"><span className="pipeline-icon recorded"><Headphones size={15} /></span><div className="pipeline-copy"><strong>Recorded</strong><span>Ready for post-production</span></div><b>05</b></div>
-                <div className="pipeline-row"><span className="pipeline-icon editing"><Video size={15} /></span><div className="pipeline-copy"><strong>Editing</strong><span>With your production team</span></div><b>07</b></div>
-                <div className="pipeline-row"><span className="pipeline-icon review"><FileText size={15} /></span><div className="pipeline-copy"><strong>Client review</strong><span>Waiting for approval</span></div><b>04</b></div>
+                <div className="pipeline-row"><span className="pipeline-icon recorded"><Headphones size={15} /></span><div className="pipeline-copy"><strong>Recorded</strong><span>Ready for post-production</span></div><b>{isServerConfigured ? dashboardEpisodes.filter((episode) => episode.status === "Recorded").length : "05"}</b></div>
+                <div className="pipeline-row"><span className="pipeline-icon editing"><Video size={15} /></span><div className="pipeline-copy"><strong>Editing</strong><span>With production team</span></div><b>{isServerConfigured ? dashboardEpisodes.filter((episode) => episode.status === "Editing").length : "07"}</b></div>
+                <div className="pipeline-row"><span className="pipeline-icon review"><FileText size={15} /></span><div className="pipeline-copy"><strong>Client review</strong><span>Waiting for approval</span></div><b>{isServerConfigured ? dashboardEpisodes.filter((episode) => episode.status === "Review").length : "04"}</b></div>
               </div>
               <button className="panel-link" onClick={() => router.push("/production")}>View production board <ArrowRight size={14} /></button>
             </article>
@@ -200,17 +233,17 @@ export default function Home() {
           <section className="bottom-grid">
             <article className="panel bookings-panel">
               <div className="panel-heading bookings-heading"><div><div className="title-with-count"><h2>Today&apos;s bookings</h2><span className="count-pill">8</span></div><p>Your studio schedule for Friday</p></div><button className="text-action" onClick={() => router.push("/bookings/calendar")}>View calendar <ArrowRight size={14} /></button></div>
-              <div className="booking-table-wrap"><table className="booking-table"><thead><tr><th>TIME</th><th>CLIENT & SESSION</th><th>STUDIO</th><th>STATUS</th><th>DURATION</th><th /></tr></thead><tbody>{bookings.map((booking) => <tr key={booking.name}><td className="time-cell">{booking.time}</td><td><div className="client-cell"><span className={`client-avatar ${booking.color}`}>{booking.initials}</span><span className="client-info"><strong>{booking.name}</strong><small>{booking.detail}</small></span></div></td><td><span className="studio-label"><span />{booking.studio}</span></td><td><span className={`status-pill ${booking.status === "In session" ? "status-live" : booking.status === "Pending" ? "status-pending" : "status-confirmed"}`}>{booking.status === "In session" && <i />}{booking.status}</span></td><td className="duration-cell"><Clock3 size={13} />{booking.duration}</td><td><button className="row-more" aria-label={`More options for ${booking.name}`} onClick={() => showNotice(`${booking.name}'s booking details selected.`)}><MoreHorizontal size={18} /></button></td></tr>)}</tbody></table></div>
+              <div className="booking-table-wrap"><table className="booking-table"><thead><tr><th>TIME</th><th>CLIENT & SESSION</th><th>STUDIO</th><th>STATUS</th><th>DURATION</th><th /></tr></thead><tbody>{dashboardBookings.map((booking) => <tr key={booking.id}><td className="time-cell">{booking.time}</td><td><div className="client-cell"><span className={`client-avatar ${booking.color}`}>{booking.initials}</span><span className="client-info"><strong>{booking.name}</strong><small>{booking.detail}</small></span></div></td><td><span className="studio-label"><span />{booking.studio}</span></td><td><span className={`status-pill ${booking.status === "In session" ? "status-live" : booking.status === "Pending" ? "status-pending" : "status-confirmed"}`}>{booking.status === "In session" && <i />}{booking.status}</span></td><td className="duration-cell"><Clock3 size={13} />{booking.duration}</td><td><button className="row-more" aria-label={`More options for ${booking.name}`} onClick={() => showNotice(`${booking.name}'s booking details selected.`)}><MoreHorizontal size={18} /></button></td></tr>)}</tbody></table>{isServerConfigured && dashboardBookings.length === 0 && <div className="empty-state">No bookings scheduled for today.</div>}</div>
               <button className="mobile-view-calendar" onClick={() => router.push("/bookings/calendar")}>View all bookings <ArrowRight size={14} /></button>
             </article>
 
             <article className="panel tasks-panel">
-              <div className="panel-heading"><div><div className="title-with-count"><h2>Upcoming tasks</h2><span className="count-pill task-count">3</span></div><p>Keep today running smoothly</p></div><button className="more-button" aria-label="More task options" onClick={() => showNotice("Task list options selected.")}><MoreHorizontal size={20} /></button></div>
-              <div className="task-list">
+              <div className="panel-heading"><div><div className="title-with-count"><h2>Upcoming tasks</h2><span className="count-pill task-count">{isServerConfigured ? dashboardTasks.filter((task) => !task.done).length : 3}</span></div><p>Keep today running smoothly</p></div><button className="more-button" aria-label="More task options" onClick={() => showNotice("Task list options selected.")}><MoreHorizontal size={20} /></button></div>
+              <div className="task-list">{isServerConfigured ? dashboardTasks.filter((task) => !task.done).slice(0, 3).map((task) => <button className="task-item" key={task.id} onClick={() => router.push("/tasks")}><span className="task-check" /><span className="task-copy"><strong>{task.title}</strong><small><span className="task-time">Due {task.due}</span><i /> {task.category}</small></span><span className="task-avatar avatar-malik">{task.assignee.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2)}</span></button>) : <>
                 <button className="task-item" onClick={() => showNotice("Studio A prep task opened.")}><span className="task-check"><Check size={12} /></span><span className="task-copy"><strong>Prepare Studio A</strong><small><span className="task-time urgent-time">Due in 20 min</span><i /> Booking prep</small></span><span className="task-avatar avatar-layla">LA</span></button>
                 <button className="task-item" onClick={() => showNotice("Audio review task opened.")}><span className="task-check" /><span className="task-copy"><strong>Review episode audio</strong><small><span className="task-time">Due at 12:00 PM</span><i /> Post-production</small></span><span className="task-avatar avatar-yousef">YK</span></button>
                 <button className="task-item" onClick={() => showNotice("Invoice task opened.")}><span className="task-check" /><span className="task-copy"><strong>Send invoice to Omar</strong><small><span className="task-time">Due at 2:00 PM</span><i /> Finance</small></span><span className="task-avatar avatar-malik">MM</span></button>
-              </div>
+              </>}</div>
               <button className="panel-link task-panel-link" onClick={() => router.push("/tasks")}>Open task manager <ArrowRight size={14} /></button>
             </article>
           </section>

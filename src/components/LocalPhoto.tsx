@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import Image from "next/image";
 import { openStoredMedia } from "@/lib/prototype-data";
+import { getOrganizationFileUrl } from "@/lib/supabase/storage";
 
 export default function LocalPhoto({ mediaId, alt, className, fallback }: { mediaId?: string; alt: string; className: string; fallback: ReactNode }) {
   const [source, setSource] = useState("");
@@ -11,6 +12,10 @@ export default function LocalPhoto({ mediaId, alt, className, fallback }: { medi
     if (!mediaId) return;
     let active = true;
     let objectUrl = "";
+    if (mediaId.includes(":")) {
+      getOrganizationFileUrl(mediaId).then((url) => { if (active && url) setSource(url); }).catch(() => { if (active) setSource(""); });
+      return () => { active = false; };
+    }
     openStoredMedia(mediaId).then((blob) => {
       if (!active) return;
       objectUrl = URL.createObjectURL(blob);
