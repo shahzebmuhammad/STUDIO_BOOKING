@@ -124,7 +124,7 @@ function changePassword_(payload) {
 
 function passwordHash_(password, salt) {
   let bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + password, Utilities.Charset.UTF_8);
-  for (let index = 0; index < 20000; index++) bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes.concat(Utilities.newBlob(salt).getBytes()), Utilities.Charset.UTF_8);
+  for (let index = 0; index < 20000; index++) bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes.concat(Utilities.newBlob(salt).getBytes()));
   return bytes.map(function (byte) { return ('0' + ((byte + 256) % 256).toString(16)).slice(-2); }).join('');
 }
 
